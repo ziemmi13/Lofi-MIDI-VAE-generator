@@ -46,6 +46,8 @@ class Encoder(nn.Module):
         
         return mu, logvar
 
+# Wklej tę finalną, poprawioną klasę do pliku model.py
+
 class HierarchicalDecoder(nn.Module):
     """
     Decodes a latent vector `z` into a piano roll sequence using a two-level
@@ -57,9 +59,11 @@ class HierarchicalDecoder(nn.Module):
         
         self.num_bars = num_bars
         self.steps_per_bar = steps_per_bar
-        self.output_size_per_step = 128 * 3 # 128 notes, 3 states each
+        self.conductor_hidden_size = conductor_hidden_size
+        self.decoder_hidden_size = decoder_hidden_size
+        self.num_layers = num_layers
+        self.output_size_per_step = 128 * 3
 
-        # --- Conductor Components ---
         self.z_to_conductor_initial = nn.Linear(latent_dim, conductor_hidden_size * num_layers * 2)
         self.conductor = nn.LSTM(
             input_size=1, 
@@ -68,7 +72,6 @@ class HierarchicalDecoder(nn.Module):
             batch_first=True
         )
 
-        # --- DecoderRNN Components ---
         self.conductor_to_decoder_initial = nn.Linear(conductor_hidden_size, decoder_hidden_size * num_layers * 2)
         self.decoder_rnn = nn.LSTM(
             input_size=1, 
@@ -82,23 +85,32 @@ class HierarchicalDecoder(nn.Module):
     def forward(self, z):
         batch_size = z.size(0)
 
-        # --- 1. Run the Conductor to get bar-level embeddings ---
+        # --- 1. Run the Conductor ---
         conductor_initial_flat = self.z_to_conductor_initial(z)
-        h_c0, c_c0 = torch.chunk(conductor_initial_flat.view(batch_size, -1, 2), 2, dim=-1)
-        h_c0 = h_c0.permute(1, 0, 2).contiguous()
-        c_c0 = c_c0.permute(1, 0, 2).contiguous()
-        
+        conductor_initial_reshaped = conductor_initial_flat.view(batch_size, 2, self.num_layers, self.conductor_hidden_size)
+        conductor_initial_permuted = conductor_initial_reshaped.permute(2, 0, 3, 1)
+
+        # --- FINAL FIX: Add .contiguous() after slicing ---
+        h_c0 = conductor_initial_permuted[..., 0].contiguous()
+        c_c0 = conductor_initial_permuted[..., 1].contiguous()
+        # --- END OF FIX ---
+
         conductor_input = torch.zeros(batch_size, self.num_bars, 1, device=z.device)
         conductor_embeddings, _ = self.conductor(conductor_input, (h_c0, c_c0))
 
-        # --- 2. Run the DecoderRNN for each bar ---
+        # --- 2. Run the DecoderRNN ---
         all_bar_outputs = []
         for i in range(self.num_bars):
             current_bar_embedding = conductor_embeddings[:, i, :]
+            
             decoder_initial_flat = self.conductor_to_decoder_initial(current_bar_embedding)
-            h_d0, c_d0 = torch.chunk(decoder_initial_flat.view(batch_size, -1, 2), 2, dim=-1)
-            h_d0 = h_d0.permute(1, 0, 2).contiguous()
-            c_d0 = c_d0.permute(1, 0, 2).contiguous()
+            decoder_initial_reshaped = decoder_initial_flat.view(batch_size, 2, self.num_layers, self.decoder_hidden_size)
+            decoder_initial_permuted = decoder_initial_reshaped.permute(2, 0, 3, 1)
+
+            # --- FINAL FIX: Add .contiguous() after slicing ---
+            h_d0 = decoder_initial_permuted[..., 0].contiguous()
+            c_d0 = decoder_initial_permuted[..., 1].contiguous()
+            # --- END OF FIX ---
 
             decoder_input = torch.zeros(batch_size, self.steps_per_bar, 1, device=z.device)
             bar_output_hidden, _ = self.decoder_rnn(decoder_input, (h_d0, c_d0))
