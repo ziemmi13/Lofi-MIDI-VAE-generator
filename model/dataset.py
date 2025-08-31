@@ -11,6 +11,7 @@ import mido
 import numpy as np
 import os
 import glob
+from config import *
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -108,42 +109,10 @@ class MidiDataset(Dataset):
         else:
             return self.sequences[idx]
 
-    def prepare_dataloaders(self, batch_size: int, split_ratios: tuple = (0.85, 0.15), num_workers: int = 0, seed: int = 42):
-        torch.manual_seed(seed)
-
-        total_size = len(self)
-        train_size = int(split_ratios[0] * total_size)
-        val_size = total_size - train_size
-
-        # Podział datasetu na podzbiory
-        train_dataset, val_dataset = random_split(self, [train_size, val_size])
-
-        print(f"Dataset split into: Train={len(train_dataset)}, Validation={len(val_dataset)}")
-
-        # Utworzenie DataLoaderów
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=num_workers,
-            pin_memory=True
-        )
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=True
-        )
-        
-        dataloaders = {'train': train_loader, 'val': val_loader}
-        
-        return dataloaders
-
     @staticmethod
     def visualize(piano_roll_tensor: torch.Tensor, title: str = "Piano roll Visualization"):
         piano_roll = piano_roll_tensor.cpu().numpy().T
-        cmap = ListedColormap(['#FFFFFF', '#16A085', '#3498DB'])
+        cmap = ListedColormap(["#000000", "#F03528", "#EDF030"])
         
         fig, ax = plt.subplots(figsize=(14, 6))
         ax.imshow(piano_roll, aspect='auto', cmap=cmap, interpolation='nearest', origin='lower')
@@ -156,10 +125,49 @@ class MidiDataset(Dataset):
         ax.set_yticklabels(y_labels)
         ax.set_ylim(20, 100)
         legend_patches = [
-            mpatches.Patch(color='#16A085', label='Atack'),
-            mpatches.Patch(color='#3498DB', label='Hold')
+            mpatches.Patch(color="#F03528", label='Atack'),
+            mpatches.Patch(color="#EDF030", label='Hold')
         ]
         ax.legend(handles=legend_patches, loc='upper right')
         plt.grid(True, which='both', axis='x', linestyle=':', color='grey', alpha=0.5)
         plt.tight_layout()
         plt.show()
+
+def prepare_dataloaders(dataset_dir, split_ratios = (85,15), seed: int = 42):
+        torch.manual_seed(seed)
+
+        print("Loading dataset...")
+        dataset = MidiDataset(
+            midi_dir=DATASET_DIR,
+            num_bars=NUM_BARS,
+            steps_per_bar=STEPS_PER_BAR
+        )
+
+        total_size = len(dataset)
+        train_size = int(split_ratios[0] * total_size)
+        val_size = total_size - train_size
+
+        # Podział datasetu na podzbiory
+        print("Splitting dataset...")
+        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+        print(f"Dataset split into: Train={len(train_dataset)}, Validation={len(val_dataset)}")
+
+        # Utworzenie DataLoaderów
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=BATCH_SIZE,
+            shuffle=True,
+            num_workers=NUM_WORKERS,
+            pin_memory=True
+        )
+        val_dataloader = DataLoader(
+            val_dataset,
+            batch_size=BATCH_SIZE,
+            shuffle=False,
+            num_workers=NUM_WORKERS,
+            pin_memory=True
+        )
+
+        print("Finished preparing dataset.\n")
+        return train_dataloader, val_dataloader

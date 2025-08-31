@@ -83,6 +83,7 @@ class HierarchicalDecoder(nn.Module):
         )
         
         self.output_projection = nn.Linear(decoder_hidden_size, self.output_size_per_step)
+        self.device = DEVICE
 
     def forward(self, z):
         batch_size = z.size(0)
@@ -92,12 +93,10 @@ class HierarchicalDecoder(nn.Module):
         conductor_initial_reshaped = conductor_initial_flat.view(batch_size, 2, self.num_layers, self.conductor_hidden_size)
         conductor_initial_permuted = conductor_initial_reshaped.permute(2, 0, 3, 1)
 
-        # --- FINAL FIX: Add .contiguous() after slicing ---
         h_c0 = conductor_initial_permuted[..., 0].contiguous()
         c_c0 = conductor_initial_permuted[..., 1].contiguous()
-        # --- END OF FIX ---
 
-        conductor_input = torch.zeros(batch_size, self.num_bars, 1, device=z.device)
+        conductor_input = torch.zeros(batch_size, self.num_bars, 1, device=self.device)
         conductor_embeddings, _ = self.conductor(conductor_input, (h_c0, c_c0))
 
         # --- 2. Run the DecoderRNN ---
@@ -109,12 +108,10 @@ class HierarchicalDecoder(nn.Module):
             decoder_initial_reshaped = decoder_initial_flat.view(batch_size, 2, self.num_layers, self.decoder_hidden_size)
             decoder_initial_permuted = decoder_initial_reshaped.permute(2, 0, 3, 1)
 
-            # --- FINAL FIX: Add .contiguous() after slicing ---
             h_d0 = decoder_initial_permuted[..., 0].contiguous()
             c_d0 = decoder_initial_permuted[..., 1].contiguous()
-            # --- END OF FIX ---
 
-            decoder_input = torch.zeros(batch_size, self.steps_per_bar, 1, device=z.device)
+            decoder_input = torch.zeros(batch_size, self.steps_per_bar, 1, device=self.device)
             bar_output_hidden, _ = self.decoder_rnn(decoder_input, (h_d0, c_d0))
             all_bar_outputs.append(bar_output_hidden)
         
@@ -129,8 +126,6 @@ class HierarchicalDecoder(nn.Module):
 class LofiModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.to(self.device)
         
         self.encoder = Encoder(
             input_dim=INPUT_DIM,
@@ -149,84 +144,50 @@ class LofiModel(nn.Module):
             num_layers=LSTM_LAYERS
         )
 
+        # The model's device is set once upon creation.
+        self.device = DEVICE
+        self.to(self.device)
+
     def reparameterize(self, mu, logvar):
-        """
-        Performs the reparameterization trick to sample from the latent space.
-        """
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
 
     def forward(self, x):
-        """
-        Defines the forward pass of the VAE.
-
-        Args:
-            x (torch.Tensor): The input piano roll tensor. 
-                              Shape: (batch_size, num_steps, 128)
-
-        Returns:
-            recon_logits (torch.Tensor): The reconstructed piano roll logits.
-                                         Shape: (batch_size, num_steps, 128, 3)
-            mu (torch.Tensor): The mean of the latent distribution.
-                               Shape: (batch_size, latent_dim)
-            logvar (torch.Tensor): The log variance of the latent distribution.
-                                   Shape: (batch_size, latent_dim)
-        """
-        # 1. Encode the input to get latent distribution parameters
         mu, logvar = self.encoder(x)
-        
-        # 2. Sample from the latent distribution using the reparameterization trick
         z = self.reparameterize(mu, logvar)
-        
-        # 3. Decode the latent vector to reconstruct the input
         recon_logits = self.decoder(z)
-        
         return recon_logits, mu, logvar
     
-    def load_weights(self, path: str, device: str = 'cpu'):
+    def load_weights(self, path: str):
         try:
-            state_dict = torch.load(path, map_location=device)
+            state_dict = torch.load(path, map_location=self.device)
             self.load_state_dict(state_dict)
-            self.to(device)
+            self.to(self.device) 
             print(f"Successfully loaded weights from {path}")
         except FileNotFoundError:
             print(f"Error: Weights not found at {path}")
         except Exception as e:
             print(f"Error loading weights: {e}")
     
-    def generate(self, device: str = 'cpu') -> torch.Tensor:
-        self.to(device)
+    def generate(self) -> torch.Tensor:
         self.eval()
         with torch.no_grad():
-            # Sample a random vector from the prior (standard normal distribution)
-            z = torch.randn(1, LATENT_DIM).to(device)
-            
-            # Decode the latent vector to get logits
+            z = torch.randn(1, LATENT_DIM).to(self.device)
             recon_logits = self.decoder(z)
-            
-            # Convert logits to the 3-state piano roll format
             generated_pianoroll = torch.argmax(recon_logits, dim=-1).squeeze(0)
-            
-            # Visualize the result
             MidiDataset.visualize(generated_pianoroll.cpu(), title="Generated Piano Roll")
             
         return generated_pianoroll
 
-    def reconstruct(self, input_pianoroll: torch.Tensor, device: str = 'cpu') -> torch.Tensor:
-        self.to(device)
+    def reconstruct(self, input_pianoroll: torch.Tensor) -> torch.Tensor:
         self.eval()
         with torch.no_grad():
-            # The model expects a batch dimension, so we add one
-            input_batch = input_pianoroll.unsqueeze(0).to(device)
+            input_batch = input_pianoroll.unsqueeze(0).to(self.device)
             
-            # Perform a full forward pass
             recon_logits, _, _ = self(input_batch)
-            
-            # Convert logits to the 3-state piano roll format
             reconstructed_pianoroll = torch.argmax(recon_logits, dim=-1).squeeze(0)
             
-            # Visualize both original and reconstructed for comparison
             MidiDataset.visualize(input_pianoroll.cpu(), title="Original Piano Roll")
             MidiDataset.visualize(reconstructed_pianoroll.cpu(), title="Reconstructed Piano Roll")
             
