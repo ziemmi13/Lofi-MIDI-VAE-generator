@@ -133,7 +133,7 @@ class MidiDataset(Dataset):
         plt.tight_layout()
         plt.show()
 
-def prepare_dataloaders(dataset_dir, split_ratios = (85,15), seed: int = 42):
+def prepare_dataloaders(split_ratios = (0.85 , 0.15), seed: int = 42):
         torch.manual_seed(seed)
 
         print("Loading dataset...")
