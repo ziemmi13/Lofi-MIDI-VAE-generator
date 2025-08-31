@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-def vae_loss_function(recon_logits, target_pianoroll, mu, logvar, beta):
+def compute_loss(recon_logits, target_pianoroll, mu, logvar, beta):
     # Reshape logits: (batch * steps * 128, 3)
     recon_logits_flat = recon_logits.view(-1, 3) 
     # Reshape targets: (batch * steps * 128)
