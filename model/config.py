@@ -4,35 +4,32 @@ import torch
 DATASET_DIR = r"C:\Users\Hyperbook\Desktop\STUDIA\SEM III\PZ#2\dataset\maestro-v3.0.0"
 NUM_BARS= 4
 STEPS_PER_BAR = 32
+USE_SLIDING_WINDOW = True
+STRIDE_IN_BARS = 4
+NUM_WORKERS = 0
 
 "MODEL"
 INPUT_DIM = 128
-EMBEDDING_DIM = 64
-ENCODER_HIDDEN_SIZE = 64
-LATENT_DIM = 128
-CONDUCTOR_HIDDEN_SIZE = 128
-DECODER_HIDDEN_SIZE = 128
-LSTM_LAYERS = 1
+EMBEDDING_DIM = 128          
+ENCODER_HIDDEN_SIZE = 512  
+LATENT_DIM = 512            
+CONDUCTOR_HIDDEN_SIZE = 512 
+DECODER_HIDDEN_SIZE = 512    
+LSTM_LAYERS = 2 
 
-
-"""TRAIN"""
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-# --- Training Hyperparameters ---
-BATCH_SIZE = 32
-LEARNING_RATE = 1e-4
-NUM_EPOCHS = 50
-
-# --- VAE Loss Control (KL Annealing) ---
+"VAE PARAMS"
 BETA_START = 0.0
-BETA_END = 0.2
+BETA_END = 0.01
 BETA_ANNEAL_STEPS = 20000
 BETA_WARMUP_EPOCHS = 15
 
-# --- Dataloader ---
-NUM_WORKERS = 0
+"""TRAIN"""
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+BATCH_SIZE = 32
+LEARNING_RATE = 1e-4
+NUM_EPOCHS = 150
 
-# --- Checkpoints and Logging ---
+"CHECKPOINTS AND LOGGING"
 CHECKPOINT_DIR = "checkpoints/"
 LOG_DIR = "runs/"
 LOG_INTERVAL = 100

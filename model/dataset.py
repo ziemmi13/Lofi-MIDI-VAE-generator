@@ -1,9 +1,4 @@
-"""
-State representation:
-- 0 (OFF): Note is off (color: white).
-- 1 (ATTACK): Note has started playing (color: green).
-- 2 (HOLD): Note is being played (color: blue).
-"""
+# dataset.py (wersja zaimplementowaną techniką sliding window)
 
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -12,6 +7,7 @@ import numpy as np
 import os
 import glob
 from config import *
+from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -22,51 +18,102 @@ STATE_ATTACK = 1
 STATE_HOLD = 2
 
 class MidiDataset(Dataset):
-    def __init__(self, midi_dir: str, num_bars: int, steps_per_bar: int = 32, verbose: bool = False):
+    def __init__(self, midi_dir: str, num_bars: int, steps_per_bar: int = 32, 
+                 use_sliding_window: bool = True, stride_in_bars: int = 1, verbose: bool = False):
         self.midi_dir = midi_dir
         self.num_bars = num_bars
         self.steps_per_bar = steps_per_bar
-        self.num_steps = num_bars * steps_per_bar
-        self.midi_files = glob.glob(os.path.join(midi_dir, '*.mid')) + \
-                          glob.glob(os.path.join(midi_dir, '*.midi'))
+        self.num_steps_per_segment = num_bars * steps_per_bar # Length of one training sample
+        self.use_sliding_window = use_sliding_window
+        self.stride_in_steps = stride_in_bars * steps_per_bar
         self.verbose = verbose
 
-        print(f"Dataset contains {len(self.midi_files)} MIDI samples.")
+        self.midi_files = glob.glob(os.path.join(midi_dir, '*.mid')) + \
+                          glob.glob(os.path.join(midi_dir, '*.midi'))
+
+        print(f"Found {len(self.midi_files)} MIDI files.")
         
         self.sequences = []
         self.file_paths = []
-        for file_path in self.midi_files:
+        
+        print("Processing MIDI files and extracting segments...")
+        for file_path in tqdm(self.midi_files, desc="Processing files"):
             try:
-                piano_roll = self._process_midi_file(file_path)
-                if piano_roll is not None:
-                    self.sequences.append(piano_roll)
-                    self.file_paths.append(file_path)
+                # Process the ENTIRE midi file into one long piano roll
+                full_piano_roll = self._process_full_midi_file(file_path)
+                
+                if full_piano_roll is None or full_piano_roll.shape[0] < self.num_steps_per_segment:
+                    continue
+
+                # --- NEW: Sliding Window Logic ---
+                if self.use_sliding_window:
+                    total_steps = full_piano_roll.shape[0]
+                    for start_step in range(0, total_steps - self.num_steps_per_segment + 1, self.stride_in_steps):
+                        end_step = start_step + self.num_steps_per_segment
+                        segment = full_piano_roll[start_step:end_step]
+                        
+                        # Trim leading silence from the segment
+                        trimmed_segment = self._trim_leading_silence(segment)
+                        if trimmed_segment is not None:
+                            self.sequences.append(torch.tensor(trimmed_segment, dtype=torch.long))
+                            self.file_paths.append(file_path)
+                else:
+                    # Original behavior: take only the first part of the file
+                    segment = full_piano_roll[:self.num_steps_per_segment]
+                    trimmed_segment = self._trim_leading_silence(segment)
+                    if trimmed_segment is not None:
+                        self.sequences.append(torch.tensor(trimmed_segment, dtype=torch.long))
+                        self.file_paths.append(file_path)
+
             except Exception as e:
                 print(f"Error processing file {os.path.basename(file_path)}: {e}")
 
-        print(f"Succesfully processed {len(self.sequences)} MIDI samples.")
+        print(f"Successfully extracted {len(self.sequences)} segments from {len(self.midi_files)} files.")
 
-    def _process_midi_file(self, file_path: str) -> torch.Tensor | None:
+    def _trim_leading_silence(self, piano_roll: np.ndarray) -> np.ndarray | None:
+        """Helper function to remove leading silence from a piano roll segment."""
+        attack_steps = np.where(np.any(piano_roll == STATE_ATTACK, axis=1))[0]
+        if len(attack_steps) > 0:
+            first_attack_step = attack_steps[0]
+            if first_attack_step > 0:
+                new_piano_roll = np.full_like(piano_roll, STATE_OFF)
+                trimmed_part = piano_roll[first_attack_step:]
+                new_piano_roll[:len(trimmed_part)] = trimmed_part
+                return new_piano_roll
+            return piano_roll # No silence to trim
+        return None # Segment is empty
+
+    def _process_full_midi_file(self, file_path: str) -> np.ndarray | None:
+        """Processes an entire MIDI file into a single long piano roll numpy array."""
         mid = mido.MidiFile(file_path, clip=True)
         if mid.ticks_per_beat == 0: return None
+        
         ticks_per_beat = mid.ticks_per_beat
         ticks_per_bar = ticks_per_beat * 4
         ticks_per_step = ticks_per_bar / self.steps_per_bar
-        piano_roll = np.full((self.num_steps, 128), STATE_OFF, dtype=np.int8)
+        
         events = []
+        total_time_ticks = 0
         for track in mid.tracks:
             current_time_ticks = 0
             for msg in track:
                 current_time_ticks += msg.time
+                total_time_ticks = max(total_time_ticks, current_time_ticks)
                 if msg.type == 'note_on' and msg.velocity > 0:
                     events.append({'type': 'on', 'note': msg.note, 'time': current_time_ticks})
                 elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                     events.append({'type': 'off', 'note': msg.note, 'time': current_time_ticks})
+        
+        if not events: return None
         events.sort(key=lambda x: x['time'])
+        
+        total_steps = int(total_time_ticks / ticks_per_step) + 1
+        piano_roll = np.full((total_steps, 128), STATE_OFF, dtype=np.int8)
+        
         active_notes = {}
         for event in events:
             step = int(event['time'] / ticks_per_step)
-            if step >= self.num_steps: continue
+            if step >= total_steps: continue
             note = event['note']
             if event['type'] == 'on':
                 piano_roll[step, note] = STATE_ATTACK
@@ -74,31 +121,11 @@ class MidiDataset(Dataset):
             elif event['type'] == 'off' and note in active_notes:
                 start_step = active_notes[note]
                 for i in range(start_step + 1, step + 1):
-                    if i < self.num_steps and piano_roll[i, note] == STATE_OFF:
+                    if i < total_steps and piano_roll[i, note] == STATE_OFF:
                         piano_roll[i, note] = STATE_HOLD
                 del active_notes[note]
-                
-        # Find the first time step with a note attack
-        attack_steps = np.where(np.any(piano_roll == STATE_ATTACK, axis=1))[0]
         
-        if len(attack_steps) > 0:
-            first_attack_step = attack_steps[0]
-            
-            # If there's leading silence, shift the piano roll
-            if first_attack_step > 0:
-                # Create a new empty piano roll
-                new_piano_roll = np.full_like(piano_roll, STATE_OFF)
-                
-                # Copy the sequence starting from the first attack
-                trimmed_part = piano_roll[first_attack_step:]
-                new_piano_roll[:len(trimmed_part)] = trimmed_part
-                
-                piano_roll = new_piano_roll
-        else:
-            # If no notes were found in the sequence, return None to skip this file
-            return None
-            
-        return torch.tensor(piano_roll, dtype=torch.long)
+        return piano_roll
 
     def __len__(self) -> int:
         return len(self.sequences)
@@ -111,9 +138,9 @@ class MidiDataset(Dataset):
 
     @staticmethod
     def visualize(piano_roll_tensor: torch.Tensor, title: str = "Piano roll Visualization"):
+        # ... (ta funkcja pozostaje bez zmian)
         piano_roll = piano_roll_tensor.cpu().numpy().T
         cmap = ListedColormap(["#000000", "#F03528", "#EDF030"])
-        
         fig, ax = plt.subplots(figsize=(14, 6))
         ax.imshow(piano_roll, aspect='auto', cmap=cmap, interpolation='nearest', origin='lower')
         ax.set_title(title, fontsize=16)
@@ -125,7 +152,7 @@ class MidiDataset(Dataset):
         ax.set_yticklabels(y_labels)
         ax.set_ylim(20, 100)
         legend_patches = [
-            mpatches.Patch(color="#F03528", label='Atack'),
+            mpatches.Patch(color="#F03528", label='Attack'),
             mpatches.Patch(color="#EDF030", label='Hold')
         ]
         ax.legend(handles=legend_patches, loc='upper right')
@@ -133,41 +160,33 @@ class MidiDataset(Dataset):
         plt.tight_layout()
         plt.show()
 
+
 def prepare_dataloaders(split_ratios = (0.85 , 0.15), seed: int = 42):
-        torch.manual_seed(seed)
-
-        print("Loading dataset...")
-        dataset = MidiDataset(
-            midi_dir=DATASET_DIR,
-            num_bars=NUM_BARS,
-            steps_per_bar=STEPS_PER_BAR
-        )
-
-        total_size = len(dataset)
-        train_size = int(split_ratios[0] * total_size)
-        val_size = total_size - train_size
-
-        # Podział datasetu na podzbiory
-        print("Splitting dataset...")
-        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-
-        print(f"Dataset split into: Train={len(train_dataset)}, Validation={len(val_dataset)}")
-
-        # Utworzenie DataLoaderów
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_size=BATCH_SIZE,
-            shuffle=True,
-            num_workers=NUM_WORKERS,
-            pin_memory=True
-        )
-        val_dataloader = DataLoader(
-            val_dataset,
-            batch_size=BATCH_SIZE,
-            shuffle=False,
-            num_workers=NUM_WORKERS,
-            pin_memory=True
-        )
-
-        print("Finished preparing dataset.\n")
-        return train_dataloader, val_dataloader
+    torch.manual_seed(seed)
+    
+    # Teraz przekazujemy parametry do sliding window z pliku config
+    print("Loading dataset with sliding window...")
+    dataset = MidiDataset(
+        midi_dir=DATASET_DIR,
+        num_bars=NUM_BARS,
+        steps_per_bar=STEPS_PER_BAR,
+        use_sliding_window=USE_SLIDING_WINDOW,
+        stride_in_bars=STRIDE_IN_BARS
+    )
+    # ... (reszta funkcji bez zmian)
+    total_size = len(dataset)
+    train_size = int(split_ratios[0] * total_size)
+    val_size = total_size - train_size
+    print("Splitting dataset...")
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    print(f"Dataset split into: Train={len(train_dataset)}, Validation={len(val_dataset)}")
+    train_dataloader = DataLoader(
+        train_dataset, batch_size=BATCH_SIZE, shuffle=True,
+        num_workers=NUM_WORKERS, pin_memory=True
+    )
+    val_dataloader = DataLoader(
+        val_dataset, batch_size=BATCH_SIZE, shuffle=False,
+        num_workers=NUM_WORKERS, pin_memory=True
+    )
+    print("Finished preparing dataset.\n")
+    return train_dataloader, val_dataloader

@@ -1,3 +1,9 @@
 venv/
 dataset/
 model/__pycache__
+stem_splitter/
+visualizations/
+checkpoints/
+generated/
+reconstructed/
+runs/

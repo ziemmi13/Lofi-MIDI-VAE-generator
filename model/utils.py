@@ -87,3 +87,28 @@ def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualization
     plt.savefig(output_filename, dpi=300)
     print(f"Saving plot to: {output_filename}\n")
     plt.show()
+
+def calculate_class_weights(dataloader):
+    """
+    Calculates inverse frequency weights for the 3 classes (OFF, ATTACK, HOLD).
+    """
+    print("Calculating class weights...")
+    # Initialize counts for 3 classes
+    class_counts = torch.zeros(3)
+    
+    for batch in tqdm(dataloader, desc="Analyzing dataset for weights"):
+        # Flatten the batch to a 1D tensor of class labels
+        labels_flat = batch.view(-1)
+        
+        # Count occurrences of each class (0, 1, 2)
+        class_counts += torch.bincount(labels_flat, minlength=3)
+            
+    # Calculate inverse frequency
+    total_counts = class_counts.sum()
+    class_weights = total_counts / class_counts
+    
+    # Normalize weights
+    class_weights = class_weights / class_weights.sum()
+    
+    print(f"Calculated class weights: {class_weights.tolist()}")
+    return class_weights
