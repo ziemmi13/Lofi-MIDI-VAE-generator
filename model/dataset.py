@@ -1,7 +1,7 @@
 """
 State representation:
 - 0 (OFF): Note is off (color: white).
-- 1 (ATACK): Note has started playing (color: green).
+- 1 (ATTACK): Note has started playing (color: green).
 - 2 (HOLD): Note is being played (color: blue).
 """
 
@@ -17,7 +17,7 @@ import matplotlib.patches as mpatches
 from matplotlib.colors import ListedColormap
 
 STATE_OFF = 0
-STATE_ATACK = 1
+STATE_ATTACK = 1
 STATE_HOLD = 2
 
 
@@ -69,7 +69,7 @@ class MidiDataset(Dataset):
             if step >= self.num_steps: continue
             note = event['note']
             if event['type'] == 'on':
-                piano_roll[step, note] = STATE_ATACK
+                piano_roll[step, note] = STATE_ATTACK
                 active_notes[note] = step
             elif event['type'] == 'off' and note in active_notes:
                 start_step = active_notes[note]
@@ -77,6 +77,29 @@ class MidiDataset(Dataset):
                     if i < self.num_steps and piano_roll[i, note] == STATE_OFF:
                         piano_roll[i, note] = STATE_HOLD
                 del active_notes[note]
+                
+        # --- NEW: Trim leading silence ---
+        
+        # Find the first time step with a note attack
+        attack_steps = np.where(np.any(piano_roll == STATE_ATTACK, axis=1))[0]
+        
+        if len(attack_steps) > 0:
+            first_attack_step = attack_steps[0]
+            
+            # If there's leading silence, shift the piano roll
+            if first_attack_step > 0:
+                # Create a new empty piano roll
+                new_piano_roll = np.full_like(piano_roll, STATE_OFF)
+                
+                # Copy the sequence starting from the first attack
+                trimmed_part = piano_roll[first_attack_step:]
+                new_piano_roll[:len(trimmed_part)] = trimmed_part
+                
+                piano_roll = new_piano_roll
+        else:
+            # If no notes were found in the sequence, return None to skip this file
+            return None
+            
         return torch.tensor(piano_roll, dtype=torch.long)
 
     def __len__(self) -> int:
