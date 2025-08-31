@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+from dataset import MidiDataset
+from config import *
 
 class Encoder(nn.Module):
     """
@@ -125,24 +127,26 @@ class HierarchicalDecoder(nn.Module):
         return final_logits
 
 class LofiModel(nn.Module):
-    def __init__(self, config: dict):
+    def __init__(self):
         super().__init__()
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.to(self.device)
         
         self.encoder = Encoder(
-            input_dim=config['input_dim'],
-            embedding_dim=config['embedding_dim'],
-            hidden_size=config['encoder_hidden_size'],
-            latent_dim=config['latent_dim'],
-            num_layers=config['num_layers']
+            input_dim=INPUT_DIM,
+            embedding_dim=EMBEDDING_DIM,
+            hidden_size=ENCODER_HIDDEN_SIZE,
+            latent_dim=LATENT_DIM,
+            num_layers=LSTM_LAYERS
         )
         
         self.decoder = HierarchicalDecoder(
-            latent_dim=config['latent_dim'],
-            conductor_hidden_size=config['conductor_hidden_size'],
-            decoder_hidden_size=config['decoder_hidden_size'],
-            num_bars=config['num_bars'],
-            steps_per_bar=config['steps_per_bar'],
-            num_layers=config['num_layers']
+            latent_dim=LATENT_DIM,
+            conductor_hidden_size=CONDUCTOR_HIDDEN_SIZE,
+            decoder_hidden_size=DECODER_HIDDEN_SIZE,
+            num_bars=NUM_BARS,
+            steps_per_bar=STEPS_PER_BAR,
+            num_layers=LSTM_LAYERS
         )
 
     def reparameterize(self, mu, logvar):
@@ -179,4 +183,52 @@ class LofiModel(nn.Module):
         recon_logits = self.decoder(z)
         
         return recon_logits, mu, logvar
+    
+    def load_weights(self, path: str, device: str = 'cpu'):
+        try:
+            state_dict = torch.load(path, map_location=device)
+            self.load_state_dict(state_dict)
+            self.to(device)
+            print(f"Successfully loaded weights from {path}")
+        except FileNotFoundError:
+            print(f"Error: Weights not found at {path}")
+        except Exception as e:
+            print(f"Error loading weights: {e}")
+    
+    def generate(self, device: str = 'cpu') -> torch.Tensor:
+        self.to(device)
+        self.eval()
+        with torch.no_grad():
+            # Sample a random vector from the prior (standard normal distribution)
+            z = torch.randn(1, LATENT_DIM).to(device)
+            
+            # Decode the latent vector to get logits
+            recon_logits = self.decoder(z)
+            
+            # Convert logits to the 3-state piano roll format
+            generated_pianoroll = torch.argmax(recon_logits, dim=-1).squeeze(0)
+            
+            # Visualize the result
+            MidiDataset.visualize(generated_pianoroll.cpu(), title="Generated Piano Roll")
+            
+        return generated_pianoroll
+
+    def reconstruct(self, input_pianoroll: torch.Tensor, device: str = 'cpu') -> torch.Tensor:
+        self.to(device)
+        self.eval()
+        with torch.no_grad():
+            # The model expects a batch dimension, so we add one
+            input_batch = input_pianoroll.unsqueeze(0).to(device)
+            
+            # Perform a full forward pass
+            recon_logits, _, _ = self(input_batch)
+            
+            # Convert logits to the 3-state piano roll format
+            reconstructed_pianoroll = torch.argmax(recon_logits, dim=-1).squeeze(0)
+            
+            # Visualize both original and reconstructed for comparison
+            MidiDataset.visualize(input_pianoroll.cpu(), title="Original Piano Roll")
+            MidiDataset.visualize(reconstructed_pianoroll.cpu(), title="Reconstructed Piano Roll")
+            
+        return reconstructed_pianoroll
 

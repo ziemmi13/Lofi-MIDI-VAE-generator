@@ -1,7 +1,4 @@
-# train.py
-
 import torch
-import torch.optim as optim
 import os
 from tqdm import tqdm
 
@@ -9,15 +6,14 @@ from tqdm import tqdm
 from dataset import MidiDataset
 from model import LofiModel
 from loss import compute_loss
-from config import config
+import torch.optim as optim
+from config import *
 
-def train():
 
-    print(f"Using device: {config.train.device}\n")
-
-    # Create directories for checkpoints and logs if they don't exist
-    os.makedirs(config.train.checkpoint_dir, exist_ok=True)
-    os.makedirs(config.train.log_dir, exist_ok=True)
+def train(model):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+    print(f"Using device: {model.device}\n")
 
     # TODO: Add TensorBoard SummaryWriter here for logging if desired
     # from torch.utils.tensorboard import SummaryWriter
@@ -25,46 +21,35 @@ def train():
     
     print("Loading dataset...")
     full_dataset = MidiDataset(
-        midi_dir=config.data.midi_dir,
-        num_bars=config.data.num_bars,
-        steps_per_bar=config.data.steps_per_bar
+        midi_dir=DATASET_DIR,
+        num_bars=NUM_BARS,
+        steps_per_bar=STEPS_PER_BAR
     )
-    dataloaders = full_dataset.prepare_dataloaders(batch_size=config.train.batch_size, num_workers=config.train.num_workers)
+    dataloaders = full_dataset.prepare_dataloaders(batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
     train_loader = dataloaders['train']
     val_loader = dataloaders['val']
     print("Finished loading dataset.\n")
-    
-    print("Initializing model...")
-    model_params = {
-        key: getattr(config.model, key)
-        for key in dir(config.model)
-        if not key.startswith('__') and not isinstance(getattr(config.model, key), type)
-    }
-    
-    model = LofiModel(model_params).to(config.train.device)
-    optimizer = optim.Adam(model.parameters(), lr=config.train.learning_rate)
-    
-    print(model)
-    print(f"Model has {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M parameters.\n")
+
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     print("-----------------------------")
     print("----- Starting training -----")
     print("-----------------------------\n")
     global_step = 0
-    for epoch in range(1, config.train.num_epochs + 1):
+    for epoch in range(1, NUM_EPOCHS + 1):
         # --- Training Phase ---
         model.train()
         train_loss_total, train_loss_recon, train_loss_kl = 0, 0, 0
         
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{config.train.num_epochs} [Training]")
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{NUM_EPOCHS} [Training]")
         for batch in pbar:
             # Move data to the configured device
-            batch = batch.to(config.train.device)
+            batch = batch.to(DEVICE)
 
             # --- KL Annealing ---
             # Calculate current beta for KL annealing
-            beta = min(config.train.beta_end, 
-                       config.train.beta_start + (config.train.beta_end - config.train.beta_start) * global_step / config.train.beta_anneal_steps)
+            beta = min(BETA_END,
+                       BETA_START + (BETA_END - BETA_START) * global_step / BETA_ANNEAL_STEPS)
             
             # Forward pass
             recon_logits, mu, logvar = model(batch)
@@ -98,11 +83,11 @@ def train():
         val_loss_total, val_loss_recon, val_loss_kl = 0, 0, 0
         with torch.no_grad():
             for batch in val_loader:
-                batch = batch.to(config.train.device)
+                batch = batch.to(DEVICE)
                 recon_logits, mu, logvar = model(batch)
                 
                 # Use the final beta value for validation
-                losses = compute_loss(recon_logits, batch, mu, logvar, config.train.beta_end)
+                losses = compute_loss(recon_logits, batch, mu, logvar, BETA_END)
                 
                 val_loss_total += losses['total_loss'].item()
                 val_loss_recon += losses['recon_loss'].item()
@@ -118,14 +103,11 @@ def train():
         # writer.add_scalar('Loss/val_total', avg_val_loss, epoch)
         
         # --- Save Checkpoint ---
-        if epoch % config.train.checkpoint_interval == 0:
-            checkpoint_path = os.path.join(config.train.checkpoint_dir, f"lofi_model_epoch_{epoch}.pth")
+        if epoch % CHECKPOINT_INTERVAL == 0:
+            checkpoint_path = os.path.join(CHECKPOINT_DIR, f"lofi_model_epoch_{epoch}.pth")
             torch.save(model.state_dict(), checkpoint_path)
             print(f"Checkpoint saved to {checkpoint_path}")
 
     # TODO: Close the TensorBoard writer
     # writer.close()
     print("Training finished.")
-
-if __name__ == '__main__':
-    train()

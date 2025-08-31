@@ -20,7 +20,6 @@ STATE_OFF = 0
 STATE_ATTACK = 1
 STATE_HOLD = 2
 
-
 class MidiDataset(Dataset):
     def __init__(self, midi_dir: str, num_bars: int, steps_per_bar: int = 32, verbose: bool = False):
         self.midi_dir = midi_dir
@@ -78,8 +77,6 @@ class MidiDataset(Dataset):
                         piano_roll[i, note] = STATE_HOLD
                 del active_notes[note]
                 
-        # --- NEW: Trim leading silence ---
-        
         # Find the first time step with a note attack
         attack_steps = np.where(np.any(piano_roll == STATE_ATTACK, axis=1))[0]
         
@@ -148,7 +145,7 @@ class MidiDataset(Dataset):
         piano_roll = piano_roll_tensor.cpu().numpy().T
         cmap = ListedColormap(['#FFFFFF', '#16A085', '#3498DB'])
         
-        fig, ax = plt.subplots(figsize=(16, 8))
+        fig, ax = plt.subplots(figsize=(14, 6))
         ax.imshow(piano_roll, aspect='auto', cmap=cmap, interpolation='nearest', origin='lower')
         ax.set_title(title, fontsize=16)
         ax.set_xlabel("Krok czasowy", fontsize=12)

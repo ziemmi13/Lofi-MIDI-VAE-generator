@@ -1,30 +1,9 @@
 from config import *
 import numpy as np
-import pretty_midi
-from config import * # Import all your configuration variables
+from config import * 
 import torch
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-
-def print_config(config):
-    print("--- Data Configuration ---")
-    for key in dir(config.data):
-        if not key.startswith('__'):
-            value = getattr(config.data, key)
-            print(f"{key}: {value}")
-
-    print("\n--- Model Configuration ---")
-    for key in dir(config.model):
-        if not key.startswith('__'):
-            value = getattr(config.model, key)
-            if not isinstance(value, type):
-                print(f"{key}: {value}")
-
-    print("\n--- Training Configuration ---")
-    for key in dir(config.train):
-        if not key.startswith('__'):
-            value = getattr(config.train, key)
-            print(f"{key}: {value}")
 
 def visualize_latent_space(model, dataloader, output_filename="latent_space.png"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
