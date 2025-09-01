@@ -9,7 +9,7 @@ class Encoder(nn.Module):
     Encodes a piano roll sequence into the parameters of a latent distribution
     (mu and logvar).
     """
-    def __init__(self, input_dim=128, embedding_dim=64, hidden_size=256, latent_dim=128, num_layers=2):
+    def __init__(self, input_dim=INPUT_DIM, embedding_dim=EMBEDDING_DIM, hidden_size=ENCODER_HIDDEN_SIZE, latent_dim=LATENT_DIM, num_layers=LSTM_LAYERS):
         super().__init__()
         
         # Input projection "embedding" layer
@@ -49,15 +49,13 @@ class Encoder(nn.Module):
         
         return mu, logvar
 
-# Wklej tę finalną, poprawioną klasę do pliku model.py
-
 class HierarchicalDecoder(nn.Module):
     """
     Decodes a latent vector `z` into a piano roll sequence using a two-level
     hierarchical structure (Conductor and DecoderRNN).
     """
-    def __init__(self, latent_dim=128, conductor_hidden_size=256, decoder_hidden_size=256, 
-                 num_bars=2, steps_per_bar=32, num_layers=2):
+    def __init__(self, latent_dim=LATENT_DIM, conductor_hidden_size=CONDUCTOR_HIDDEN_SIZE, decoder_hidden_size=DECODER_HIDDEN_SIZE, 
+                 num_bars=NUM_BARS, steps_per_bar=STEPS_PER_BAR, num_layers=LSTM_LAYERS):
         super().__init__()
         
         self.num_bars = num_bars

@@ -132,12 +132,8 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
             if experiment:
                 experiment.log_figure(figure=fig, figure_name=f"Reconstruction_Epoch_{epoch}", overwrite=True)
             
-            # --- POPRAWIONY BLOK ---
-            # Explicitly display the figure in the notebook
             display(fig)
-            # Then close it to free up memory
             plt.close(fig)
-            # --- KONIEC POPRAWKI ---
 
             print('_' * 60, "\n")
     
