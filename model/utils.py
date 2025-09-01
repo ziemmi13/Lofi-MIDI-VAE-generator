@@ -5,6 +5,10 @@ import torch
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from tqdm import tqdm
+import mido
+STATE_OFF = 0
+STATE_ATTACK = 1
+STATE_HOLD = 2
 
 def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualizations"):
     """
@@ -112,3 +116,90 @@ def calculate_class_weights(dataloader):
     
     print(f"Calculated class weights: {class_weights.tolist()}")
     return class_weights
+
+# Dodaj tę funkcję i potrzebne importy do swojego pliku utils.py
+
+
+
+def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str, 
+                   ticks_per_beat: int = 480, tempo_bpm: int = 120):
+    """
+    Converts a 3-state piano roll tensor into a MIDI file.
+
+    Args:
+        piano_roll_tensor (torch.Tensor): The (num_steps, 128) tensor with states 0, 1, 2.
+        output_path (str): Path to save the output .mid file.
+        ticks_per_beat (int): The MIDI file's time resolution.
+        tempo_bpm (int): The tempo of the resulting piece in beats per minute.
+    """
+    from config import STEPS_PER_BAR # Import locally to get time context
+
+    print(f"Converting tensor to MIDI file at {output_path}...")
+    
+    # Ensure tensor is on CPU and is a numpy array
+    piano_roll = piano_roll_tensor.cpu().numpy()
+    num_steps, num_notes = piano_roll.shape
+    
+    # Calculate how many MIDI ticks correspond to one step in our piano roll
+    ticks_per_step = (ticks_per_beat * 4) / STEPS_PER_BAR # Assuming 4/4 time
+
+    # --- Create MIDI File and Track ---
+    mid = mido.MidiFile(ticks_per_beat=ticks_per_beat)
+    track = mido.MidiTrack()
+    mid.tracks.append(track)
+    
+    # Set tempo (required for correct playback speed)
+    track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_bpm)))
+    # Set instrument to Acoustic Grand Piano (program 0)
+    track.append(mido.Message('program_change', program=0, time=0))
+
+    # --- Find note start and end events ---
+    events = []
+    for pitch in range(num_notes):
+        note_start_step = -1
+        for step in range(num_steps):
+            state = piano_roll[step, pitch]
+            
+            # If a note starts (state is ATTACK)
+            if state == STATE_ATTACK and note_start_step < 0:
+                note_start_step = step
+            
+            # If a note ends (state is OFF after being ON)
+            elif state == STATE_OFF and note_start_step >= 0:
+                duration_steps = step - note_start_step
+                # Add note_on and note_off events with absolute time in steps
+                events.append({'type': 'note_on', 'pitch': pitch, 'step': note_start_step})
+                events.append({'type': 'note_off', 'pitch': pitch, 'step': note_start_step + duration_steps})
+                note_start_step = -1
+        
+        # Handle notes that are still on at the very end of the sequence
+        if note_start_step >= 0:
+            duration_steps = num_steps - note_start_step
+            events.append({'type': 'note_on', 'pitch': pitch, 'step': note_start_step})
+            events.append({'type': 'note_off', 'pitch': pitch, 'step': note_start_step + duration_steps})
+
+    # --- Convert events to MIDI messages with relative time ---
+    if not events:
+        print("Warning: No notes found in the tensor. Saving an empty MIDI file.")
+        mid.save(output_path)
+        return
+
+    # Sort events chronologically by step
+    events.sort(key=lambda e: e['step'])
+    
+    last_event_ticks = 0
+    for event in events:
+        current_event_ticks = int(event['step'] * ticks_per_step)
+        delta_ticks = current_event_ticks - last_event_ticks
+        
+        track.append(mido.Message(
+            event['type'],
+            note=event['pitch'],
+            velocity=80, # Use a standard velocity for generated notes
+            time=delta_ticks
+        ))
+        last_event_ticks = current_event_ticks
+
+    # Save the final MIDI file
+    mid.save(output_path)
+    print("MIDI file saved successfully.")

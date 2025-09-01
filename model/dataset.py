@@ -137,28 +137,38 @@ class MidiDataset(Dataset):
             return self.sequences[idx]
 
     @staticmethod
-    def visualize(piano_roll_tensor: torch.Tensor, title: str = "Piano roll Visualization"):
-        # ... (ta funkcja pozostaje bez zmian)
+    def visualize(piano_roll_tensor: torch.Tensor, title: str = "Piano roll Visualization", 
+                  show_plot: bool = True, ax=None):
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(14, 6))
+        else:
+            fig = ax.get_figure()
+
         piano_roll = piano_roll_tensor.cpu().numpy().T
         cmap = ListedColormap(["#000000", "#F03528", "#EDF030"])
-        fig, ax = plt.subplots(figsize=(14, 6))
+        
         ax.imshow(piano_roll, aspect='auto', cmap=cmap, interpolation='nearest', origin='lower')
         ax.set_title(title, fontsize=16)
-        ax.set_xlabel("Krok czasowy", fontsize=12)
-        ax.set_ylabel("Nuta MIDI", fontsize=12)
+        ax.set_xlabel("Time Step", fontsize=12)
+        ax.set_ylabel("MIDI Note", fontsize=12)
         y_ticks = np.arange(0, 128, 12)
         y_labels = [f"C{i-1}" for i in range(len(y_ticks))]
         ax.set_yticks(y_ticks)
         ax.set_yticklabels(y_labels)
         ax.set_ylim(20, 100)
+        
         legend_patches = [
             mpatches.Patch(color="#F03528", label='Attack'),
             mpatches.Patch(color="#EDF030", label='Hold')
         ]
         ax.legend(handles=legend_patches, loc='upper right')
-        plt.grid(True, which='both', axis='x', linestyle=':', color='grey', alpha=0.5)
-        plt.tight_layout()
-        plt.show()
+        ax.grid(True, which='both', axis='x', linestyle=':', color='grey', alpha=0.5)
+        
+        if show_plot:
+            plt.tight_layout()
+            plt.show()
+        
+        return fig
 
 
 def prepare_dataloaders(split_ratios = (0.85 , 0.15), seed: int = 42):

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from dataset import MidiDataset
 from config import *
+from utils import *
 
 class Encoder(nn.Module):
     """
@@ -170,26 +171,26 @@ class LofiModel(nn.Module):
         except Exception as e:
             print(f"Error loading weights: {e}")
     
-    def generate(self) -> torch.Tensor:
+    def generate(self, output_path="generated.mid") -> torch.Tensor:
+        device = next(self.parameters()).device
         self.eval()
         with torch.no_grad():
-            z = torch.randn(1, LATENT_DIM).to(self.device)
+            z = torch.randn(1, LATENT_DIM).to(device)
             recon_logits = self.decoder(z)
             generated_pianoroll = torch.argmax(recon_logits, dim=-1).squeeze(0)
-            MidiDataset.visualize(generated_pianoroll.cpu(), title="Generated Piano Roll")
-            
+
+        if output_path:
+            tensor_to_midi(generated_pianoroll, output_path)
         return generated_pianoroll
 
-    def reconstruct(self, input_pianoroll: torch.Tensor) -> torch.Tensor:
+    def reconstruct(self, input_pianoroll: torch.Tensor, output_path="reconstructed.mid") -> torch.Tensor:
+        device = next(self.parameters()).device
         self.eval()
         with torch.no_grad():
-            input_batch = input_pianoroll.unsqueeze(0).to(self.device)
-            
+            input_batch = input_pianoroll.unsqueeze(0).to(device)
             recon_logits, _, _ = self(input_batch)
             reconstructed_pianoroll = torch.argmax(recon_logits, dim=-1).squeeze(0)
-            
-            MidiDataset.visualize(input_pianoroll.cpu(), title="Original Piano Roll")
-            MidiDataset.visualize(reconstructed_pianoroll.cpu(), title="Reconstructed Piano Roll")
-            
+        if output_path:
+            tensor_to_midi(reconstructed_pianoroll, output_path)
         return reconstructed_pianoroll
 
