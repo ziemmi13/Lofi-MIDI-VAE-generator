@@ -1,4 +1,4 @@
-# train.py (wersja finalna z logowaniem wizualizacji)
+# train.py
 
 import torch
 import os
@@ -8,15 +8,25 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import matplotlib.pyplot as plt
 from IPython.display import display
 
+# Import our custom modules
 from dataset import MidiDataset, prepare_dataloaders
 from model import LofiModel
 from loss import compute_loss
-from utils import calculate_class_weights
+from utils import calculate_class_weights, visualize_latent_space
 from config import * 
 from train_utils import EarlyStopping, setup_commet_loger
 
 
 def train(model, early_stopping=False, experiment_name=None, verbose=True):
+    """
+    Main function to train the LofiModel.
+    
+    Args:
+        model (LofiModel): The model instance to be trained.
+        early_stopping (bool): If True, enables early stopping.
+        experiment_name (str, optional): The name for the Comet.ml experiment. If None, logging is disabled.
+        verbose (bool): If True, shows reconstructions during training.
+    """
     model.to(DEVICE)
     print(f"Using device: {DEVICE}\n")
 
@@ -25,6 +35,7 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
     
     train_dataloader, val_dataloader = prepare_dataloaders()
     
+    # Calculate class weights for the loss function to handle data imbalance
     class_weights = calculate_class_weights(train_dataloader).to(DEVICE)
     
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
@@ -34,23 +45,36 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
     experiment = None
     if experiment_name:
         experiment = setup_commet_loger(experiment_name)
+        # Log all hyperparameters from the config file for reproducibility
         hyperparams = {
-            # ... (logowanie hiperparametrów tak jak poprzednio)
+            "dataset_dir": DATASET_DIR,
+            "num_bars": NUM_BARS, "steps_per_bar": STEPS_PER_BAR,
+            "use_sliding_window": USE_SLIDING_WINDOW, "stride_in_bars": STRIDE_IN_BARS,
+            "model_input_dim": INPUT_DIM, "model_embedding_dim": EMBEDDING_DIM,
+            "model_encoder_hidden_size": ENCODER_HIDDEN_SIZE, "model_latent_dim": LATENT_DIM,
+            "model_conductor_hidden_size": CONDUCTOR_HIDDEN_SIZE, "model_decoder_hidden_size": DECODER_HIDDEN_SIZE,
+            "model_lstm_layers": LSTM_LAYERS,
+            "vae_beta_start": BETA_START, "vae_beta_end": BETA_END,
+            "vae_beta_anneal_steps": BETA_ANNEAL_STEPS, "vae_beta_warmup_epochs": BETA_WARMUP_EPOCHS,
+            "vae_kl_free_bits": KL_FREE_BITS,
+            "train_device": DEVICE, "train_batch_size": BATCH_SIZE,
+            "train_learning_rate": LEARNING_RATE, "train_num_epochs": NUM_EPOCHS
         }
         experiment.log_parameters(hyperparams)
 
     early_stopper = None
     if early_stopping:
         early_stopper = EarlyStopping(patience=30, path=os.path.join(CHECKPOINT_DIR, "best_model.pt"), verbose=True)
-
+    
     print("-----------------------------")
     print("----- Starting training -----")
-    # ... (główna pętla treningowa i walidacyjna bez zmian) ...
-    
+    print("-----------------------------\n")
+
     global_step = 0
     for epoch in range(1, NUM_EPOCHS + 1):
         model.train()
         train_loss_total = 0
+        
         pbar = tqdm(train_dataloader, desc=f"Epoch {epoch}/{NUM_EPOCHS} [Training]")
         for batch in pbar:
             batch = batch.to(DEVICE)
@@ -78,8 +102,12 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
                 'KL': f"{losses['kl_loss'].item():.4f}", 'beta': f"{beta:.4f}"
             })
             
-            if experiment:
+            if experiment and global_step % LOG_INTERVAL == 0:
                 experiment.log_metric("train_batch_loss", total_loss.item(), step=global_step)
+                experiment.log_metric("train_batch_recon_loss", losses['recon_loss'].item(), step=global_step)
+                experiment.log_metric("train_batch_kl_loss", losses['kl_loss'].item(), step=global_step)
+                experiment.log_metric("beta", beta, step=global_step)
+
             global_step += 1
 
         # --- Validation Phase ---
@@ -92,7 +120,7 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
                 losses = compute_loss(recon_logits, batch, mu, logvar, BETA_END, class_weights)
                 val_loss_total += losses['total_loss'].item()
 
-        # --- Epoch Summary & Logging ---
+        # --- Epoch Summary and Logging ---
         avg_train_loss = train_loss_total / len(train_dataloader)
         avg_val_loss = val_loss_total / len(val_dataloader)
         print(f"\nEpoch {epoch} Summary: Avg Train Loss: {avg_train_loss:.4f}, Avg Val Loss: {avg_val_loss:.4f}")
@@ -134,7 +162,6 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
             
             display(fig)
             plt.close(fig)
-
             print('_' * 60, "\n")
     
     if experiment:
