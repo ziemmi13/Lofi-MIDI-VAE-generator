@@ -181,7 +181,7 @@ class LofiModel(nn.Module):
             tensor_to_midi(generated_pianoroll, output_path)
         return generated_pianoroll
 
-    def reconstruct(self, input_pianoroll: torch.Tensor, output_path="reconstructed.mid") -> torch.Tensor:
+    def reconstruct(self, input_pianoroll: torch.Tensor, output_path="reconstructed/reconstructed.mid") -> torch.Tensor:
         device = next(self.parameters()).device
         self.eval()
         with torch.no_grad():

@@ -11,7 +11,8 @@ import mido
 import numpy as np
 import os
 import glob
-from config import *
+# from config import *
+from finetune_config import *
 from tqdm import tqdm
 import pandas as pd
 from typing import Optional, Tuple
@@ -26,7 +27,7 @@ STATE_ATTACK = 1
 STATE_HOLD = 2
 
 # --- Default value if BPM is not found ---
-DEFAULT_BPM = 120.0
+DEFAULT_BPM = 100.0
 
 class MidiDataset(Dataset):
     """

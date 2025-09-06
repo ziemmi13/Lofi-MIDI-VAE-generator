@@ -31,7 +31,7 @@ def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualization
     with torch.no_grad():
         # ZMIANA: Prawidłowe rozpakowanie danych z dataloadera
         for batch in tqdm(dataloader, desc="Encoding samples"):
-            pianorolls, _ = batch # DataLoader zwraca (pianoroll, bpm)
+            pianorolls = batch # DataLoader zwraca (pianoroll)
             pianorolls = pianorolls.to(device)
 
             mean, _ = model.encoder(pianorolls)
@@ -89,7 +89,7 @@ def calculate_class_weights(dataloader):
     
     for batch in tqdm(dataloader, desc="Analyzing dataset for weights"):
         # ZMIANA: Prawidłowe rozpakowanie danych z dataloadera
-        pianorolls, _ = batch # DataLoader zwraca (pianoroll, bpm)
+        pianorolls = batch # DataLoader zwraca (pianoroll, bpm)
         labels_flat = pianorolls.view(-1)
         class_counts += torch.bincount(labels_flat, minlength=3)
             
@@ -101,7 +101,6 @@ def calculate_class_weights(dataloader):
     print(f"Calculated class weights: {class_weights.tolist()}")
     return class_weights
 
-# --- POPRAWIONA FUNKCJA ---
 def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str, 
                    ticks_per_beat: int = 480, tempo_bpm: int = 120):
     """
@@ -131,16 +130,12 @@ def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str,
     track.append(mido.Message('program_change', program=0, time=0))
 
     events = []
-    # --- NOWA, POPRAWIONA LOGIKA WYSZUKIWANIA ZDARZEŃ ---
     for pitch in range(num_notes):
         for step in range(num_steps):
-            # Wykryj początek nuty (tylko w momencie ataku)
             if piano_roll[step, pitch] == STATE_ATTACK:
-                # To jest początek nowej nuty, znajdź jej koniec
                 note_on_step = step
                 note_off_step = note_on_step + 1 # Nuta musi trwać co najmniej jeden krok
 
-                # Szukaj do przodu, aż znajdziesz stan OFF lub koniec utworu
                 for end_step in range(note_on_step + 1, num_steps):
                     if piano_roll[end_step, pitch] == STATE_OFF:
                         note_off_step = end_step
