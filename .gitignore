@@ -7,3 +7,4 @@ checkpoints/
 generated/
 reconstructed/
 runs/
+dataset_sanitycheck/
