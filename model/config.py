@@ -2,13 +2,12 @@ import torch
 
 "DATASET"
 DATASET_DIR = r"C:\Users\Hyperbook\Desktop\STUDIA\SEM III\PZ#2\dataset\transformed_dataset_3_imnstrumenty"
-METADATA_CSV_PATH = r"C:\Users\Hyperbook\Desktop\STUDIA\SEM III\PZ#2\dataset\midi_metadata_dla_3_instrumentow.csv"
-NUM_BARS= 4 
+CSV_PATH = r"C:\Users\Hyperbook\Desktop\STUDIA\SEM III\PZ#2\dataset\midi_metadata_dla_3_instrumentow.csv"
+NUM_BARS = 4      
 STEPS_PER_BAR = 16
 USE_SLIDING_WINDOW = True
-STRIDE_IN_BARS = 4
+STRIDE_IN_BARS = 2
 NUM_WORKERS = 0
-TARGET_BPM = 100
 
 "MODEL"
 INPUT_DIM = 128
@@ -21,9 +20,9 @@ LSTM_LAYERS = 2
 
 "VAE PARAMS"
 BETA_START = 0.0
-BETA_END = 0.05
-BETA_ANNEAL_STEPS = 200_000
-BETA_WARMUP_EPOCHS = 30
+BETA_END = 0.1
+BETA_ANNEAL_STEPS = 100_000 
+BETA_PREWARMUP_EPOCHS = 30
 KL_FREE_BITS = 0.6
 
 """TRAIN"""
@@ -36,4 +35,4 @@ NUM_EPOCHS = 200
 CHECKPOINT_DIR = "checkpoints/"
 LOG_DIR = "runs/"
 CHECKPOINT_INTERVAL = 10
-LOG_INTERVAL = 10
+LOG_INTERVAL = 100

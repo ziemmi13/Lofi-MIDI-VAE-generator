@@ -6,13 +6,14 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 import mido
+from dataset import MidiDataset, prepare_dataloaders
 
 # --- State Constants ---
 STATE_OFF = 0
 STATE_ATTACK = 1
 STATE_HOLD = 2
 
-def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualizations"):
+def visualize_latent_space(model, dataloader, output_dir="visualizations"):
     """
     Visualizes the latent space of the VAE model using PCA.
     
@@ -22,7 +23,7 @@ def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualization
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
     
-    print(f"\n--- Visualising latent space for epoch: {epoch} ---")
+    print(f"\n--- Visualising latent space")
     os.makedirs(output_dir, exist_ok=True)
     
     all_z_means = []
@@ -30,8 +31,7 @@ def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualization
 
     with torch.no_grad():
         # ZMIANA: Prawidłowe rozpakowanie danych z dataloadera
-        for batch in tqdm(dataloader, desc="Encoding samples"):
-            pianorolls = batch # DataLoader zwraca (pianoroll)
+        for pianorolls, _ in tqdm(dataloader, desc="Encoding samples"):
             pianorolls = pianorolls.to(device)
 
             mean, _ = model.encoder(pianorolls)
@@ -78,7 +78,9 @@ def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualization
     output_filename = os.path.join(output_dir, f"latent_space_epoch_{epoch}.png")
     plt.savefig(output_filename, dpi=300)
     print(f"Saving plot to: {output_filename}\n")
-    plt.show(block=False) # Użyj block=False, aby skrypt mógł kontynuować
+    plt.show(block=False) 
+
+    return pca, z_2d
 
 def calculate_class_weights(dataloader):
     """
@@ -87,9 +89,7 @@ def calculate_class_weights(dataloader):
     print("Calculating class weights...")
     class_counts = torch.zeros(3)
     
-    for batch in tqdm(dataloader, desc="Analyzing dataset for weights"):
-        # ZMIANA: Prawidłowe rozpakowanie danych z dataloadera
-        pianorolls = batch # DataLoader zwraca (pianoroll, bpm)
+    for pianorolls, _ in tqdm(dataloader, desc="Analyzing dataset for weights"):
         labels_flat = pianorolls.view(-1)
         class_counts += torch.bincount(labels_flat, minlength=3)
             
@@ -102,7 +102,7 @@ def calculate_class_weights(dataloader):
     return class_weights
 
 def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str, 
-                   ticks_per_beat: int = 480, tempo_bpm: int = 120):
+                   bpm: int, ticks_per_beat: int = 16):
     """
     Converts a 3-state piano roll tensor into a MIDI file.
     This corrected version properly handles note durations and re-articulations.
@@ -126,7 +126,7 @@ def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str,
     track = mido.MidiTrack()
     mid.tracks.append(track)
     
-    track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_bpm)))
+    track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(bpm)))
     track.append(mido.Message('program_change', program=0, time=0))
 
     events = []
@@ -140,7 +140,6 @@ def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str,
                     if piano_roll[end_step, pitch] == STATE_OFF:
                         note_off_step = end_step
                         break
-                    # Jeśli nie znaleziono OFF, nuta trwa do końca
                     note_off_step = num_steps 
                 
                 events.append({'type': 'note_on', 'pitch': pitch, 'step': note_on_step})
@@ -170,6 +169,40 @@ def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str,
         last_event_ticks = current_event_ticks
 
     # Upewnij się, że katalog docelowy istnieje
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     mid.save(output_path)
     print("MIDI file saved successfully.")
+
+def explore_latent_space(model, data_loader, points_to_explore):
+    model.eval()
+    pca, z_2d = visualize_latent_space(model, data_loader)
+
+    # --- 3. Interactive Exploration Loop ---
+    print("\n--- Latent Space Explorer ---")
+            
+    for x, y in points_to_explore:
+        print(f"Generating sample from point ({x}, {y})...")
+        # --- 4. Inverse Transform and Generation ---
+        with torch.no_grad():
+
+            # Create a 2D point and reshape it for the inverse transform
+            point_2d = np.array([[x, y]])
+            
+            # Use the fitted PCA object to transform the 2D point back to the high-dimensional space
+            point_high_dim = pca.inverse_transform(point_2d)
+            
+            # Convert to a PyTorch tensor and move to the correct device
+            z_vector = torch.from_numpy(point_high_dim).float().to(model.device)
+            
+            # Generate a piano roll using only the decoder
+            generated_pianoroll = model.decoder(z_vector)
+            final_pianoroll = torch.argmax(generated_pianoroll, dim=-1).squeeze(0)
+        
+        # Visualize the generated piano roll
+        MidiDataset.visualize(final_pianoroll.cpu(), title=f"Generated from ({x:.2f}, {y:.2f})")
+        
+        # Save the generated sample to a MIDI file
+        output_dir = "generated_explorations"
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, f"sample_x{x:.2f}_y{y:.2f}.mid")
+        tensor_to_midi(final_pianoroll, output_path, bpm=100)
+    

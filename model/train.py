@@ -13,8 +13,7 @@ from dataset import MidiDataset, prepare_dataloaders
 from model import LofiModel
 from loss import compute_loss
 from utils import calculate_class_weights, visualize_latent_space
-# from config import * 
-from model.config_finetuning import *
+from config import * 
 from train_utils import EarlyStopping, setup_commet_loger
 
 
@@ -34,7 +33,7 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
     
-    train_dataloader, val_dataloader = prepare_dataloaders()
+    train_dataloader, val_dataloader = prepare_dataloaders(CSV_PATH)
     
     # Calculate class weights for the loss function to handle data imbalance
     class_weights = calculate_class_weights(train_dataloader).to(DEVICE)
@@ -56,7 +55,7 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
             "model_conductor_hidden_size": CONDUCTOR_HIDDEN_SIZE, "model_decoder_hidden_size": DECODER_HIDDEN_SIZE,
             "model_lstm_layers": LSTM_LAYERS,
             "vae_beta_start": BETA_START, "vae_beta_end": BETA_END,
-            "vae_beta_anneal_steps": BETA_ANNEAL_STEPS, "vae_beta_warmup_epochs": BETA_WARMUP_EPOCHS,
+            "vae_beta_anneal_steps": BETA_PREWARMUP_EPOCHS, "vae_beta_warmup_epochs": BETA_PREWARMUP_EPOCHS,
             "vae_kl_free_bits": KL_FREE_BITS,
             "train_device": DEVICE, "train_batch_size": BATCH_SIZE,
             "train_learning_rate": LEARNING_RATE, "train_num_epochs": NUM_EPOCHS
@@ -77,15 +76,15 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
         train_loss_total = 0
         
         pbar = tqdm(train_dataloader, desc=f"Epoch {epoch}/{NUM_EPOCHS} [Training]")
-        for batch in pbar:
+        for batch, bpm in pbar:
             batch = batch.to(DEVICE)
 
-            if epoch <= BETA_WARMUP_EPOCHS:
+            if epoch <= BETA_PREWARMUP_EPOCHS:
                 beta = 0.0
             else:
-                current_anneal_step = global_step - (len(train_dataloader) * BETA_WARMUP_EPOCHS)
+                current_anneal_step = global_step - (len(train_dataloader) * BETA_PREWARMUP_EPOCHS)
                 beta = min(BETA_END,
-                           BETA_START + (BETA_END - BETA_START) * current_anneal_step / BETA_ANNEAL_STEPS)
+                           BETA_START + (BETA_END - BETA_START) * current_anneal_step / BETA_PREWARMUP_EPOCHS)
             
             recon_logits, mu, logvar = model(batch)
             losses = compute_loss(recon_logits, batch, mu, logvar, beta, class_weights)
@@ -115,7 +114,7 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
         model.eval()
         val_loss_total = 0
         with torch.no_grad():
-            for batch in val_dataloader:
+            for batch, bpm in val_dataloader:
                 batch = batch.to(DEVICE)
                 recon_logits, mu, logvar = model(batch)
                 losses = compute_loss(recon_logits, batch, mu, logvar, BETA_END, class_weights)
@@ -147,8 +146,8 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
         if verbose and (epoch % 10 == 0 or epoch == 1 or epoch == NUM_EPOCHS):
             print(f"\nGenerating visualization for epoch {epoch}:")
             random_num = torch.randint(0, len(val_dataloader.dataset), (1,)).item()
-            original_tensor = val_dataloader.dataset[random_num]
-            reconstructed_tensor = model.reconstruct(original_tensor)
+            original_tensor, bpm = val_dataloader.dataset[random_num]
+            reconstructed_tensor = model.reconstruct(original_tensor, bpm)
             
             fig, axes = plt.subplots(2, 1, figsize=(16, 12))
             fig.suptitle(f"Reconstruction at Epoch {epoch}", fontsize=20)
