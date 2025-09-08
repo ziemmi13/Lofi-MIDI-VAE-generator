@@ -14,7 +14,7 @@ from model import LofiModel
 from loss import compute_loss
 from utils import calculate_class_weights, visualize_latent_space
 # from config import * 
-from finetune_config import *
+from model.config_finetuning import *
 from train_utils import EarlyStopping, setup_commet_loger
 
 

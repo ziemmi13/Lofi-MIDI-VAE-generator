@@ -12,7 +12,7 @@ import numpy as np
 import os
 import glob
 # from config import *
-from finetune_config import *
+from config_finetuning import *
 from tqdm import tqdm
 import pandas as pd
 from typing import Optional, Tuple

@@ -11,7 +11,7 @@ from dataset_finetuning import MidiDataset, prepare_dataloaders
 from model import LofiModel
 from loss import compute_loss
 from utils import calculate_class_weights
-from finetune_config import * 
+from config_finetuning import * 
 from train_utils import EarlyStopping, setup_commet_loger
 
 def finetune(model, freeze_encoder=True, early_stopping=False, experiment_name=None, verbose=True):
