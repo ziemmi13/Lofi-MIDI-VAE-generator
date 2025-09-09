@@ -6,13 +6,14 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 import mido
+from dataset import MidiDataset, prepare_dataloaders
 
 # --- State Constants ---
 STATE_OFF = 0
 STATE_ATTACK = 1
 STATE_HOLD = 2
 
-def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualizations"):
+def visualize_latent_space(model, dataloader, output_dir="visualizations"):
     """
     Visualizes the latent space of the VAE model using PCA.
     
@@ -22,7 +23,7 @@ def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualization
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
     
-    print(f"\n--- Visualising latent space for epoch: {epoch} ---")
+    print(f"\n--- Visualising latent space")
     os.makedirs(output_dir, exist_ok=True)
     
     all_z_means = []
@@ -30,8 +31,7 @@ def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualization
 
     with torch.no_grad():
         # ZMIANA: Prawidłowe rozpakowanie danych z dataloadera
-        for batch in tqdm(dataloader, desc="Encoding samples"):
-            pianorolls = batch # DataLoader zwraca (pianoroll)
+        for pianorolls, _ in tqdm(dataloader, desc="Encoding samples"):
             pianorolls = pianorolls.to(device)
 
             mean, _ = model.encoder(pianorolls)
@@ -70,15 +70,17 @@ def visualize_latent_space(model, dataloader, epoch=0, output_dir="visualization
     cbar = fig.colorbar(scatter, ax=ax)
     cbar.set_label('Average Pitch (MIDI Note Number)', fontsize=12)
 
-    ax.set_title(f'Latent Space Visualization (Epoch {epoch})', fontsize=16)
+    ax.set_title(f'Latent Space Visualization', fontsize=16)
     ax.set_xlabel('Principal Component 1', fontsize=12)
     ax.set_ylabel('Principal Component 2', fontsize=12)
     ax.grid(True)
 
-    output_filename = os.path.join(output_dir, f"latent_space_epoch_{epoch}.png")
+    output_filename = os.path.join(output_dir, f"latent_space.png")
     plt.savefig(output_filename, dpi=300)
     print(f"Saving plot to: {output_filename}\n")
-    plt.show(block=False) # Użyj block=False, aby skrypt mógł kontynuować
+    plt.show(block=False) 
+
+    return pca, z_2d
 
 def calculate_class_weights(dataloader):
     """
@@ -87,9 +89,7 @@ def calculate_class_weights(dataloader):
     print("Calculating class weights...")
     class_counts = torch.zeros(3)
     
-    for batch in tqdm(dataloader, desc="Analyzing dataset for weights"):
-        # ZMIANA: Prawidłowe rozpakowanie danych z dataloadera
-        pianorolls = batch # DataLoader zwraca (pianoroll, bpm)
+    for pianorolls, _ in tqdm(dataloader, desc="Analyzing dataset for weights"):
         labels_flat = pianorolls.view(-1)
         class_counts += torch.bincount(labels_flat, minlength=3)
             
@@ -101,56 +101,75 @@ def calculate_class_weights(dataloader):
     print(f"Calculated class weights: {class_weights.tolist()}")
     return class_weights
 
-def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str, 
-                   ticks_per_beat: int = 480, tempo_bpm: int = 120):
+# You should have these constants defined, matching your MidiDataset
+MIN_PITCH = 36  # C2
+STATE_ATTACK = 1
+STATE_HOLD = 2
+STATE_OFF = 0
+
+def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str,
+                   bpm: int, ticks_per_beat: int = 480, min_pitch: int = MIN_PITCH):
     """
-    Converts a 3-state piano roll tensor into a MIDI file.
-    This corrected version properly handles note durations and re-articulations.
+    Converts a 3-state piano roll tensor (with a limited pitch range) into a MIDI file.
+    This corrected version properly handles note durations, re-articulations, and maps
+    the pitch index back to the correct MIDI note number.
 
     Args:
-        piano_roll_tensor (torch.Tensor): The (num_steps, 128) tensor with states 0, 1, 2.
+        piano_roll_tensor (torch.Tensor): The (num_steps, num_pitches) tensor with states 0, 1, 2.
         output_path (str): Path to save the output .mid file.
-        ticks_per_beat (int): The MIDI file's time resolution.
-        tempo_bpm (int): The tempo of the resulting piece in beats per minute.
+        bpm (int): The tempo of the resulting piece in beats per minute.
+        ticks_per_beat (int): The MIDI file's time resolution. A standard value is 480.
+        min_pitch (int): The lowest MIDI note number represented by index 0 in the piano roll.
     """
-    from config import STEPS_PER_BAR
+    # Assuming STEPS_PER_BAR is defined elsewhere, e.g., from a config file
+    # from config import STEPS_PER_BAR
+    STEPS_PER_BAR = 16 # Or import it
 
     print(f"Converting tensor to MIDI file at {output_path}...")
     
     piano_roll = piano_roll_tensor.cpu().numpy()
-    num_steps, num_notes = piano_roll.shape
+    num_steps, num_pitches = piano_roll.shape
     
+    # Calculate how many MIDI ticks one step in the piano roll represents
+    # A bar has 4 beats. ticks_per_bar = ticks_per_beat * 4
     ticks_per_step = (ticks_per_beat * 4) / STEPS_PER_BAR
 
     mid = mido.MidiFile(ticks_per_beat=ticks_per_beat)
     track = mido.MidiTrack()
     mid.tracks.append(track)
     
-    track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_bpm)))
+    track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(bpm)))
     track.append(mido.Message('program_change', program=0, time=0))
 
     events = []
-    for pitch in range(num_notes):
+    for pitch_idx in range(num_pitches):
         for step in range(num_steps):
-            if piano_roll[step, pitch] == STATE_ATTACK:
+            # A new note starts on an ATTACK state
+            if piano_roll[step, pitch_idx] == STATE_ATTACK:
                 note_on_step = step
-                note_off_step = note_on_step + 1 # Nuta musi trwać co najmniej jeden krok
+                note_off_step = note_on_step + 1 # Default duration of 1 step
 
+                # Find the end of the note by scanning forward
                 for end_step in range(note_on_step + 1, num_steps):
-                    if piano_roll[end_step, pitch] == STATE_OFF:
+                    # The note ends if the state is no longer HOLD
+                    if piano_roll[end_step, pitch_idx] != STATE_HOLD:
                         note_off_step = end_step
                         break
-                    # Jeśli nie znaleziono OFF, nuta trwa do końca
-                    note_off_step = num_steps 
+                else: # If the loop completes, the note holds until the end
+                    note_off_step = num_steps
                 
-                events.append({'type': 'note_on', 'pitch': pitch, 'step': note_on_step})
-                events.append({'type': 'note_off', 'pitch': pitch, 'step': note_off_step})
+                # The actual MIDI note is the index + the minimum pitch
+                midi_note = pitch_idx + min_pitch
+                
+                events.append({'type': 'note_on', 'pitch': midi_note, 'step': note_on_step, 'velocity': 80})
+                events.append({'type': 'note_off', 'pitch': midi_note, 'step': note_off_step, 'velocity': 0})
 
     if not events:
         print("Warning: No notes found in the tensor. Saving an empty MIDI file.")
         mid.save(output_path)
         return
 
+    # Sort all events by their step time
     events.sort(key=lambda e: e['step'])
     
     last_event_ticks = 0
@@ -158,18 +177,15 @@ def tensor_to_midi(piano_roll_tensor: torch.Tensor, output_path: str,
         current_event_ticks = int(event['step'] * ticks_per_step)
         delta_ticks = current_event_ticks - last_event_ticks
         
-        # Użyj velocity=0 dla note_off, co jest standardową praktyką
-        velocity = 80 if event['type'] == 'note_on' else 0
-        
         track.append(mido.Message(
             event['type'],
             note=event['pitch'],
-            velocity=velocity,
+            velocity=event['velocity'],
             time=delta_ticks
         ))
         last_event_ticks = current_event_ticks
-
-    # Upewnij się, że katalog docelowy istnieje
+    
+    # Ensure the target directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     mid.save(output_path)
     print("MIDI file saved successfully.")

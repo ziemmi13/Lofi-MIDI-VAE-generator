@@ -1,18 +1,23 @@
+# config.py
+
 import torch
 
 "DATASET"
-DATASET_DIR = r"C:\Users\Hyperbook\Desktop\STUDIA\SEM III\PZ#2\dataset\transformed_dataset_3_imnstrumenty"
-METADATA_CSV_PATH = r"C:\Users\Hyperbook\Desktop\STUDIA\SEM III\PZ#2\dataset\midi_metadata_dla_3_instrumentow.csv"
-NUM_BARS= 4 
-STEPS_PER_BAR = 16
+DATASET_DIR = r"C:\Users\Hyperbook\Desktop\STUDIA\SEM III\PZ#2\dataset\maestro-v3.0.0"
+METADATA_CSV_PATH = r"C:\Users\Hyperbook\Desktop\STUDIA\SEM III\PZ#2\dataset\maestro-midi_tempos.csv"
+
+NUM_BARS = 8
+STEPS_PER_BAR = 8
 USE_SLIDING_WINDOW = True
 STRIDE_IN_BARS = 4
 NUM_WORKERS = 0
 TARGET_BPM = 100
 
 "MODEL"
-INPUT_DIM = 128
-EMBEDDING_DIM = 128
+NUM_PITCHES = 36
+INPUT_DIM = NUM_PITCHES  # Encoder's input dimension
+
+EMBEDDING_DIM = 128 
 ENCODER_HIDDEN_SIZE = 512
 LATENT_DIM = 512
 CONDUCTOR_HIDDEN_SIZE = 512
@@ -20,10 +25,10 @@ DECODER_HIDDEN_SIZE = 512
 LSTM_LAYERS = 2
 
 "VAE PARAMS"
-BETA_START = 0.0
-BETA_END = 0.05
+BETA_START = 0.05
+BETA_END = 0.2
 BETA_ANNEAL_STEPS = 200_000
-BETA_WARMUP_EPOCHS = 30
+BETA_WARMUP_EPOCHS = 20
 KL_FREE_BITS = 0.6
 
 """TRAIN"""
@@ -35,5 +40,5 @@ NUM_EPOCHS = 200
 "CHECKPOINTS AND LOGGING"
 CHECKPOINT_DIR = "checkpoints/"
 LOG_DIR = "runs/"
-CHECKPOINT_INTERVAL = 10
+CHECKPOINT_INTERVAL = 5
 LOG_INTERVAL = 10

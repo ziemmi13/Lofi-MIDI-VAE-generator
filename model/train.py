@@ -1,5 +1,3 @@
-# train.py
-
 import torch
 import os
 from tqdm import tqdm
@@ -10,11 +8,9 @@ from IPython.display import display
 
 # Import our custom modules
 from dataset import MidiDataset, prepare_dataloaders
-from model import LofiModel
 from loss import compute_loss
-from utils import calculate_class_weights, visualize_latent_space
-# from config import * 
-from model.config_finetuning import *
+from utils import calculate_class_weights
+from config import * 
 from train_utils import EarlyStopping, setup_commet_loger
 
 
@@ -77,7 +73,7 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
         train_loss_total = 0
         
         pbar = tqdm(train_dataloader, desc=f"Epoch {epoch}/{NUM_EPOCHS} [Training]")
-        for batch in pbar:
+        for batch, _ in pbar:
             batch = batch.to(DEVICE)
 
             if epoch <= BETA_WARMUP_EPOCHS:
@@ -115,7 +111,7 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
         model.eval()
         val_loss_total = 0
         with torch.no_grad():
-            for batch in val_dataloader:
+            for batch, _ in val_dataloader:
                 batch = batch.to(DEVICE)
                 recon_logits, mu, logvar = model(batch)
                 losses = compute_loss(recon_logits, batch, mu, logvar, BETA_END, class_weights)
@@ -147,7 +143,7 @@ def train(model, early_stopping=False, experiment_name=None, verbose=True):
         if verbose and (epoch % 10 == 0 or epoch == 1 or epoch == NUM_EPOCHS):
             print(f"\nGenerating visualization for epoch {epoch}:")
             random_num = torch.randint(0, len(val_dataloader.dataset), (1,)).item()
-            original_tensor = val_dataloader.dataset[random_num]
+            original_tensor, _ = val_dataloader.dataset[random_num]
             reconstructed_tensor = model.reconstruct(original_tensor)
             
             fig, axes = plt.subplots(2, 1, figsize=(16, 12))

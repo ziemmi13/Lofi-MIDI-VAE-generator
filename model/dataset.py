@@ -11,8 +11,7 @@ import mido
 import numpy as np
 import os
 import glob
-# from config import *
-from config_finetuning import *
+from config import *
 from tqdm import tqdm
 import pandas as pd
 from typing import Optional, Tuple
@@ -28,6 +27,10 @@ STATE_HOLD = 2
 
 # --- Default value if BPM is not found ---
 DEFAULT_BPM = 100.0
+
+MIN_PITCH = 36  # C2
+MAX_PITCH = 72  # C5 (exclusive, so notes up to B4)
+NUM_PITCHES = MAX_PITCH - MIN_PITCH 
 
 class MidiDataset(Dataset):
     """
@@ -165,49 +168,45 @@ class MidiDataset(Dataset):
         ticks_per_bar = ticks_per_beat * 4
         ticks_per_step = ticks_per_bar / self.steps_per_bar
         
-        if ticks_per_step == 0:
-            print(f"Warning: ticks_per_step is zero for {file_name}. Skipping file.")
-            return None
-
         events = []
         total_time_ticks = 0
-        
-        # --- ZMIANA: Wybór tylko trzeciej ścieżki (indeks 2) ---
-        if len(normalized_mid.tracks) < 3:
-            print(f"Warning: File {file_name} has fewer than 3 tracks ({len(normalized_mid.tracks)}). Skipping file.")
-            return None
-
-        piano_track = normalized_mid.tracks[2] # Wybieramy trzecią ścieżkę
+        piano_track = normalized_mid.tracks[1] # P
 
         current_time_ticks = 0
-        for msg in piano_track: # Iterujemy tylko po komunikatach z wybranej ścieżki
+        for msg in piano_track: 
             current_time_ticks += msg.time
             total_time_ticks = max(total_time_ticks, current_time_ticks)
-            if msg.type == 'note_on' and msg.velocity > 0:
-                events.append({'type': 'on', 'note': msg.note, 'time': current_time_ticks})
-            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                events.append({'type': 'off', 'note': msg.note, 'time': current_time_ticks})
-        # --- KONIEC ZMIANY ---
+            # CHANGED: Filter notes to be within the desired pitch range
+            if msg.type in ['note_on', 'note_off'] and MIN_PITCH <= msg.note < MAX_PITCH:
+                if msg.type == 'note_on' and msg.velocity > 0:
+                    events.append({'type': 'on', 'note': msg.note, 'time': current_time_ticks})
+                elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                    events.append({'type': 'off', 'note': msg.note, 'time': current_time_ticks})
 
         if not events: return None
         events.sort(key=lambda x: x['time'])
         
         total_steps = int(np.ceil(total_time_ticks / ticks_per_step))
-        piano_roll = np.full((total_steps, 128), STATE_OFF, dtype=np.int8)
+        # CHANGED: Piano roll width is now based on the number of pitches in the range
+        piano_roll = np.full((total_steps, NUM_PITCHES), STATE_OFF, dtype=np.int8)
         
         active_notes = {}
         for event in events:
             step = int(round(event['time'] / ticks_per_step))
             if step >= total_steps: continue
+            
             note = event['note']
+            # CHANGED: Map the MIDI note number to an index in our smaller piano roll
+            pitch_idx = note - MIN_PITCH
+            
             if event['type'] == 'on':
-                piano_roll[step, note] = STATE_ATTACK
+                piano_roll[step, pitch_idx] = STATE_ATTACK
                 active_notes[note] = step
             elif event['type'] == 'off' and note in active_notes:
                 start_step = active_notes[note]
                 for i in range(start_step + 1, step + 1):
-                    if i < total_steps and piano_roll[i, note] == STATE_OFF:
-                        piano_roll[i, note] = STATE_HOLD
+                    if i < total_steps and piano_roll[i, pitch_idx] == STATE_OFF:
+                        piano_roll[i, pitch_idx] = STATE_HOLD
                 del active_notes[note]
         
         return piano_roll, original_bpm
@@ -226,7 +225,6 @@ class MidiDataset(Dataset):
         if self.verbose:
             return sequence, bpm, self.file_paths[idx]
         else:
-            # Poprawka: Zwracaj zawsze krotkę, aby zachować spójność
             return sequence, bpm
     
     @staticmethod
@@ -238,18 +236,26 @@ class MidiDataset(Dataset):
             fig = ax.get_figure()
 
         piano_roll = piano_roll_tensor.cpu().numpy().T
-        cmap = ListedColormap(["#000000", "#F03528", "#EDF030"])
+        cmap = ListedColormap(["#FFFFFF", "#F03528", "#EDF030"]) # Changed Black to White for OFF
         ax.imshow(piano_roll, aspect='auto', cmap=cmap, interpolation='nearest', origin='lower')
         
         ax.set_title(title, fontsize=16)
         ax.set_xlabel("Time Step", fontsize=12)
         ax.set_ylabel("MIDI Note", fontsize=12)
         
-        y_ticks = np.arange(0, 128, 12)
-        y_labels = [f"C{i-2}" for i in range(len(y_ticks))]
+        y_ticks = []
+        y_labels = []
+        # We want a label for every C note in our range (C2, C3, C4)
+        for midi_note in range(MIN_PITCH, MAX_PITCH):
+            if midi_note % 12 == 0:  # If the note is a C
+                pitch_idx = midi_note - MIN_PITCH
+                octave = (midi_note // 12) - 1
+                y_ticks.append(pitch_idx)
+                y_labels.append(f'C{octave}')
+        
         ax.set_yticks(y_ticks)
         ax.set_yticklabels(y_labels)
-        ax.set_ylim(20, 100)
+        ax.set_ylim(-0.5, NUM_PITCHES - 0.5)
         
         legend_patches = [
             mpatches.Patch(color="#F03528", label='Attack'),
