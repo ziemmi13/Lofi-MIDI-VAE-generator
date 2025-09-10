@@ -236,7 +236,7 @@ class MidiDataset(Dataset):
             fig = ax.get_figure()
 
         piano_roll = piano_roll_tensor.cpu().numpy().T
-        cmap = ListedColormap(["#FFFFFF", "#F03528", "#EDF030"]) # Changed Black to White for OFF
+        cmap = ListedColormap(["#000000", "#F03528", "#EDF030"]) # Changed Black to White for OFF
         ax.imshow(piano_roll, aspect='auto', cmap=cmap, interpolation='nearest', origin='lower')
         
         ax.set_title(title, fontsize=16)
